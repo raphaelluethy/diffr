@@ -1,0 +1,23 @@
+classDiagram
+  class DiagramTheme {
+    +bool dark
+    +u32 background
+    +light() DiagramTheme
+    +dark() DiagramTheme
+  }
+  class RenderedDiagram {
+    +String svg
+    +f32 width
+    +f32 height
+  }
+  class Renderer {
+    <<interface>>
+    +render_svg(src, theme) RenderedDiagram
+  }
+  Renderer ..> DiagramTheme : uses
+  Renderer --> RenderedDiagram : produces
+  class Legacy
+  Renderer <|-- Legacy
+  cssClass "RenderedDiagram" added
+  class DiagramTheme:::changed
+  Legacy:::removed

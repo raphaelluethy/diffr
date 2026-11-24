@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- diffr's icon: a lowercase d, with a line out and a line in.
+       Original artwork for diffr, under the GNU GPL, version 3 or later (see LICENSE). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b1553"/>
+      <stop offset="1" stop-color="#0c0a1c"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.55" r="0.5">
+      <stop offset="0" stop-color="#db2777" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#db2777" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.13"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ink" gradientUnits="userSpaceOnUse" x1="400" y1="220" x2="620" y2="800">
+      <stop offset="0" stop-color="#f472b6"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#halo)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#ffffff" stroke-opacity="0.10" stroke-width="3"/>
+  <g transform="translate(22 12)">
+    <g fill="none" stroke="url(#ink)" stroke-width="84" stroke-linecap="round">
+      <path d="M 690 250 V 750"/>
+      <path d="M 690 540 A 200 200 0 1 0 690 560"/>
+    </g>
+    <g stroke-linecap="round" stroke-width="56">
+      <line x1="398" y1="500" x2="542" y2="500" stroke="#fb7185"/>
+      <line x1="398" y1="604" x2="542" y2="604" stroke="#4ade80"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,17 @@
+[package]
+name = "diffr-diagram"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Validate and render Mermaid diagrams to app-themed, resvg-compatible SVG for diffr"
+
+[dependencies]
+mermaid-rs-renderer = { version = "0.3.1", default-features = false }
+regex = "1"
+# For render_png. Same major/minor as gpui-pre 0.3.7, which rasterizes SVG
+# with resvg/usvg 0.46: the app builds them once.
+usvg = { version = "0.46.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+resvg = { version = "0.46.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }

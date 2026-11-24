@@ -1,0 +1,9 @@
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Validating : agent emits diagram
+  Validating --> Rendered : ok
+  Validating --> Failed : syntax error
+  Failed --> Validating : agent fixes source
+  Rendered --> [*]
+  class Validating added
+  Failed:::changed

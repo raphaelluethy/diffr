@@ -1,0 +1,19 @@
+[package]
+name = "diffr-agent"
+description = "Runs a local coding agent (Claude Code, Codex, OpenCode) to review a change"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha1 = "0.10"
+tempfile = "3"
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -1,0 +1,14 @@
+sequenceDiagram
+  participant A as Agent
+  participant D as diffr
+  participant R as Renderer
+  A->>D: diagram source
+  D->>R: validate(src)
+  alt syntax error
+    R-->>D: line 3, column 5: ...
+    D-->>A: error, fix and resend
+  else ok
+    R-->>D: SVG
+    D-->>A: ok: flowchart, 5 nodes
+  end
+  Note over D,R: rendered with the app theme

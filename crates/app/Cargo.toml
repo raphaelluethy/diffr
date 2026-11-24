@@ -1,0 +1,53 @@
+[package]
+name = "diffr"
+description = "A native, local diff viewer for reviewing and committing Git changes"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "diffr"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+gpui.workspace = true
+gpui_platform.workspace = true
+diffr-git = { path = "../git" }
+diffr-github = { path = "../github" }
+diffr-agent = { path = "../agent" }
+diffr-highlight = { path = "../highlight" }
+diffr-fileicon = { path = "../fileicon" }
+diffr-diagram = { path = "../diagram" }
+rust-embed = "8"
+regex = "1"
+pulldown-cmark = { version = "0.13", default-features = false }
+smallvec = "1"
+unicode-segmentation = "1"
+dirs = "6"
+time = "0.3"
+ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
+async-channel = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSError", "NSObject", "NSString"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = [
+    "std",
+    "bitflags",
+    "block2",
+    "UNNotification",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationResponse",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNUserNotificationCenter",
+] }

@@ -1,0 +1,13 @@
+%% Example of what a reviewing agent might emit for a change.
+flowchart LR
+  subgraph App["diffr app"]
+    Review[Review panel] --> Render[Diagram view]
+  end
+  Agent([AI agent]) -->|emits mermaid| Check{check-diagram}
+  Check -->|ok| Render
+  Check -->|error + line/col| Agent
+  Render --> Svg[(SVG cache)]
+  Legacy[ASCII preview]
+  class Render,Check added
+  Review:::changed
+  class Legacy removed

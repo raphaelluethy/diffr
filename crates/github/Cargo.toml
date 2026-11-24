@@ -1,0 +1,17 @@
+[package]
+name = "diffr-github"
+description = "GitHub REST + GraphQL client for reviewing pull requests, and the pure logic of pull request reviews"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+diffr-agent = { path = "../agent" }
+regex = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }

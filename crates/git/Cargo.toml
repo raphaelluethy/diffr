@@ -1,0 +1,24 @@
+[package]
+name = "diffr-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Git access, diff parsing, review comments and settings for diffr"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = "2"
+dirs = "6"
+sha1_smol = "1"
+unicode-general-category = "1.1"
+
+[dev-dependencies]
+tempfile = "3"

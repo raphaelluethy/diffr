@@ -1,0 +1,17 @@
+erDiagram
+  REVIEW ||--o{ DIAGRAM : contains
+  DIAGRAM ||--|{ NODE : has
+  REVIEW {
+    string id PK
+    string commit
+  }
+  DIAGRAM {
+    string source
+    string kind
+  }
+  NODE {
+    string label
+    string status
+  }
+  class DIAGRAM added
+  NODE:::changed
