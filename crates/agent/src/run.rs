@@ -17,7 +17,7 @@ use crate::labs::{self, LabTool};
 use crate::models::{opencode_major, opencode_model};
 use crate::proc::{self, Watchdog};
 use crate::{Agent, Analysis, Error, INLINE_LIMIT, Request, diffs, fit, nullable, parse};
-use crate::{schema_for, shellenv, system_prompt, user_prompt};
+use crate::{review_instructions, schema_for, shellenv, system_prompt, user_prompt_with_patch};
 
 /// Bounds a run: the agents cap their own turns, and the user can stop
 /// one sooner.
@@ -81,6 +81,9 @@ pub fn run(
     cancel: &CancelToken,
     mut progress: impl FnMut(&str),
 ) -> Result<Analysis, Error> {
+    if cancel.is_cancelled() {
+        return Err(Error::Canceled);
+    }
     // Diffs too large for the prompt go to a file the agent reads, in the
     // repository's git directory, which the agents may read.
     let all_diffs = diffs(&req.files);
@@ -103,12 +106,19 @@ pub fn run(
         patch_path = f.path().to_string_lossy().into_owned();
         _patch_file = Some(f);
     }
+    let user = user_prompt_with_patch(req, inline.then_some(all_diffs.as_str()));
+    drop(all_diffs);
+    let (system, schema) = if takes_schema(agent) {
+        (review_instructions(req, &patch_path, false), schema_for(&req.labs, req.suggest_commits))
+    } else {
+        (system_prompt(req, &patch_path, true), String::new())
+    };
     let job = Job {
         dir: req.dir.clone(),
         model: req.model.clone(),
-        system: system_prompt(req, &patch_path, !takes_schema(agent)),
-        user: user_prompt(req, inline),
-        schema: schema_for(&req.labs, req.suggest_commits),
+        system,
+        user,
+        schema,
         // The commands the labs let the agent run, of the diffr executable.
         tools: labs::enabled(&req.labs)
             .iter()
@@ -121,7 +131,7 @@ pub fn run(
             .map(|p| p.to_string_lossy().into_owned()),
         fast: req.fast,
     };
-    let answer = exec(agent, &job, cancel, &mut progress)?;
+    let answer = exec(agent, job, cancel, &mut progress)?;
     progress("Organizing the review…");
     let result = match answer.structured {
         Some(v) => serde_json::from_value::<Analysis>(v)
@@ -176,7 +186,7 @@ pub(crate) struct Answer {
 /// answers, fails, is cancelled or runs over [`TIMEOUT`].
 pub(crate) fn exec(
     agent: Agent,
-    job: &Job,
+    job: Job,
     cancel: &CancelToken,
     progress: &mut dyn FnMut(&str),
 ) -> Result<Answer, Error> {
@@ -191,10 +201,10 @@ pub(crate) fn exec(
         model: job.model.clone(),
         ..Default::default()
     };
-    let (system, user, schema) = (job.system.clone(), job.user.clone(), job.schema.clone());
+    let (system, user, schema) = (job.system, job.user, job.schema);
     let tools = &job.tools;
     let tool_bin = job.tool_bin.as_str();
-    let mut stdin = format!("{system}\n\n{user}");
+    let mut stdin_system = None;
     let mut args: Vec<String>;
     let mut env: Vec<(String, String)> = Vec::new();
     // Temporary files that live as long as the run.
@@ -202,7 +212,6 @@ pub(crate) fn exec(
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     match agent.name {
         "claude" => {
-            stdin = user;
             args = s(&[
                 "-p",
                 "--output-format",
@@ -287,6 +296,7 @@ pub(crate) fn exec(
             args.push("-".into());
             _keep.push(schema_file);
             _keep.push(last);
+            stdin_system = Some(system);
         }
         "opencode" => {
             args = s(&["run", "--format", "json"]);
@@ -307,6 +317,7 @@ pub(crate) fn exec(
                     opencode_config(tool_bin, tools),
                 ));
             }
+            stdin_system = Some(system);
             let model = opencode_model(&bin, &job.dir, &job.model, v2);
             if !model.is_empty() {
                 args.push("--model".into());
@@ -339,7 +350,11 @@ pub(crate) fn exec(
 
     let stdin_thread = child.stdin.take().map(|mut w| {
         thread::spawn(move || {
-            let _ = w.write_all(stdin.as_bytes());
+            if let Some(system) = stdin_system {
+                let _ = w.write_all(system.as_bytes());
+                let _ = w.write_all(b"\n\n");
+            }
+            let _ = w.write_all(user.as_bytes());
         })
     });
     let stderr_thread = child.stderr.take().map(|mut e| {

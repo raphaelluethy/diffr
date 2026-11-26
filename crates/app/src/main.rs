@@ -1205,7 +1205,7 @@ mod tests {
         let mut comments = diffr_git::Comments::new();
         let id = comments.add("a.rs", diffr_git::Side::New, 2, 2);
         comments.get_mut(id).unwrap().text = "Why new?".into();
-        let saved = [SavedFile { file, old_lines: None, new_lines: None }];
+        let saved = [SavedFile { file: file.into(), old_lines: None, new_lines: None }];
         let md = comments.markdown(&saved, "");
         assert!(md.contains("old()") && md.contains("new()"), "{md}");
         assert!(!md.contains("No patch context"), "{md}");

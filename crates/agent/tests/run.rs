@@ -297,6 +297,8 @@ fn fake_agents() {
             "{}: stdin {stdin}",
             tc.name
         );
+        assert_eq!(stdin.contains("<schema>"), tc.agent == "opencode");
+        assert_eq!(stdin.matches("---DIFFS---").count(), 1);
     }
 
     // The diagrams lab: its prompt, schema and tool, for Claude Code.
@@ -346,6 +348,7 @@ fn fake_agents() {
         .unwrap_or_else(|| panic!("no rule in {args:?}"));
     assert!(allowed < rule && rule < disallowed, "{args:?}");
     let all = args.join("\n");
+    assert!(!all.contains("<schema>"));
     assert!(all.contains(
         "run `\"/opt/diffr/bin/diffr\" check-diagram` with the diagram's Mermaid source on stdin"
     ));
@@ -354,6 +357,29 @@ fn fake_agents() {
     assert!(all.contains(
         "\"required\": [\"key\", \"label\", \"summary\", \"critical\", \"filePaths\", \"fileSummaries\", \"fileNotes\", \"lineNotes\", \"diagram\"]"
     ));
+
+    // A large review keeps the complete patch available during the run and
+    // removes the temporary file afterwards.
+    let mut req = with_diagrams(work.path());
+    req.files[0].patch = "+changed line\n".repeat(diffr_agent::INLINE_LIMIT / 10);
+    let git_dir = work.path().join(".git");
+    std::fs::create_dir(&git_dir).unwrap();
+    let expected_patch = diffr_agent::diffs(&req.files);
+    let mut patch_path = None;
+    run(by_name("claude").unwrap(), &req, &CancelToken::new(), |step| {
+        if step == "Starting Claude Code…" {
+            let file = std::fs::read_dir(&git_dir).unwrap().next().unwrap().unwrap();
+            assert_eq!(std::fs::read_to_string(file.path()).unwrap(), expected_patch);
+            patch_path = Some(file.path());
+        }
+    }).unwrap();
+    let patch_path = patch_path.expect("a temporary patch during the run");
+    assert!(!patch_path.exists());
+    let args = std::fs::read_to_string(dir.join("args")).unwrap();
+    assert!(args.contains(patch_path.to_str().unwrap()));
+    let stdin = std::fs::read_to_string(dir.join("stdin")).unwrap();
+    assert!(stdin.contains("---MANIFEST---"));
+    assert!(!stdin.contains("---DIFFS---"));
 
     // Codex failing with an API's error as JSON.
     fake_agent(

@@ -520,7 +520,6 @@ impl Diffr {
             let s = f.expanded.entry(gap).or_default();
             s.top += top;
             s.bottom += bottom;
-            f.metrics = None;
             this.rows_dirty = true;
             cx.notify();
         };
@@ -641,6 +640,7 @@ impl Diffr {
         let gutter = self.gutter_width(fi, window);
         let lh = self.line_height();
         let split = self.split_file(&self.files[fi]);
+        self.files[fi].prepare_words(r, split);
         let one_sided = self.files[fi].one_sided();
         let hs = if self.settings.word_wrap { 0. } else { self.hscroll.get(&self.files[fi].file.path).copied().unwrap_or(0.) };
         let path = self.files[fi].file.path.clone();

@@ -219,7 +219,7 @@ pub fn message(
         extra_dir: None,
         fast: req.fast,
     };
-    let answer = exec(agent, &job, cancel, &mut progress)?;
+    let answer = exec(agent, job, cancel, &mut progress)?;
     let m = match answer.structured {
         Some(v) => serde_json::from_value::<CommitMessage>(v).map_err(|e| e.to_string()),
         None => serde_json::from_str::<CommitMessage>(extract_json(&answer.text)).map_err(|e| e.to_string()),
@@ -335,7 +335,7 @@ pub fn plan(
         extra_dir: None,
         fast: req.fast,
     };
-    let answer = exec(agent, &job, cancel, &mut progress)?;
+    let answer = exec(agent, job, cancel, &mut progress)?;
     let p = match answer.structured {
         Some(v) => serde_json::from_value::<Plan>(v).map_err(|e| e.to_string()),
         None => serde_json::from_str::<Plan>(extract_json(&answer.text)).map_err(|e| e.to_string()),

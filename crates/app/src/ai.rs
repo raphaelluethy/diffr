@@ -129,7 +129,7 @@ pub fn agent_file(f: &diffr_git::File) -> diffr_agent::File {
         deletions: f.deletions,
         binary: f.binary,
         generated: f.generated,
-        patch: patch_text(f),
+        patch: if f.generated { String::new() } else { patch_text(f) },
     }
 }
 
@@ -275,7 +275,7 @@ impl Diffr {
                 head = rev;
             }
         }
-        req.files = self.files.iter().filter(|f| !f.file.directory).map(|f| agent_file(&f.file)).collect();
+        let files: Vec<_> = self.files.iter().filter(|f| !f.file.directory).map(|f| f.file.clone()).collect();
         // Uncommitted changes are committed group by group.
         req.suggest_commits = src == Source::WorkingTree;
         req.fast = self.use_fast();
@@ -299,11 +299,16 @@ impl Diffr {
         let progress: Arc<Mutex<(String, String)>> = Default::default();
         let sink = progress.clone();
         let job = cx.background_spawn(async move {
+            if cancel.is_cancelled() {
+                return Err(diffr_agent::Error::Canceled);
+            }
             let a = diffr_agent::pick(&name)?;
             sink.lock().unwrap().1 = a.label.to_string();
             if !base.is_empty() && !head.is_empty() {
                 req.commits = repo.subjects(&base, &head, 100);
             }
+            req.files = files.iter().map(|f| agent_file(f)).collect();
+            drop(files);
             let res = diffr_agent::run(a, &req, &cancel, |s| sink.lock().unwrap().0 = s.to_string());
             if let (Ok(an), Some(path)) = (&res, &path) {
                 let _ = diffr_agent::cache::save_analysis(path, an, &fingerprints);
@@ -325,9 +330,11 @@ impl Diffr {
                         if !who.is_empty() {
                             st.agent = who;
                         }
-                        let r = st.running;
-                        cx.notify();
-                        r
+                        let running = st.running;
+                        if running && this.source == src2 {
+                            cx.notify();
+                        }
+                        running
                     })
                     .unwrap_or(false);
                 if !running {

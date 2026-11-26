@@ -77,7 +77,9 @@ impl Watchdog {
                     kill_group(pid);
                     return;
                 }
-                thread::sleep(Duration::from_millis(50));
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let wait = if cancel.is_some() { remaining.min(Duration::from_millis(50)) } else { remaining };
+                thread::park_timeout(wait);
             }
         });
         Watchdog {
@@ -95,6 +97,7 @@ impl Watchdog {
     pub(crate) fn stop(&mut self) {
         self.done.store(true, Ordering::SeqCst);
         if let Some(h) = self.handle.take() {
+            h.thread().unpark();
             let _ = h.join();
         }
     }

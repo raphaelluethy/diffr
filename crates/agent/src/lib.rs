@@ -752,6 +752,14 @@ pub const INLINE_LIMIT: usize = 200_000;
 /// block, from agents that do not take a schema. They include those of
 /// the labs of `req.labs`.
 pub fn system_prompt(req: &Request, patch_path: &str, fenced: bool) -> String {
+    let mut prompt = review_instructions(req, patch_path, fenced);
+    prompt.push_str("\n\n<schema>\n");
+    prompt.push_str(&schema_for(&req.labs, req.suggest_commits));
+    prompt.push_str("\n</schema>");
+    prompt
+}
+
+pub(crate) fn review_instructions(req: &Request, patch_path: &str, fenced: bool) -> String {
     let mut files = if req.checkout {
         "The repository is checked out in the current directory: open its files when the hunks are not enough to tell what a change is for.".to_string()
     } else if !req.rev.is_empty() {
@@ -800,7 +808,6 @@ pub fn system_prompt(req: &Request, patch_path: &str, fenced: bool) -> String {
         "\n4. Do what the labs above ask, and check their output as they say.".to_string()
     };
     let answer_step = if enabled.is_empty() { 4 } else { 5 };
-    let schema = schema_for(&req.labs, req.suggest_commits);
     let commits = if req.suggest_commits {
         format!(
             "\n\n<commits>\nThese changes are not committed yet: the author will commit them group by group. Make each group a coherent commit that stands on its own (a feature with its tests, a fix, a refactor), and give it a \"commit\" message.\n{}\n</commits>",
@@ -846,17 +853,18 @@ The reviewer sees critical groups and notes labeled "Needs care" and the other n
 2. {files}
 3. {never}{lab_step}
 {answer_step}. {answer}
-</workflow>
-
-<schema>
-{schema}
-</schema>"#
+</workflow>"#
     )
 }
 
 /// Describes the change: its title, commits, files and, when `inline`,
 /// its diffs.
 pub fn user_prompt(req: &Request, inline: bool) -> String {
+    let patch = inline.then(|| diffs(&req.files));
+    user_prompt_with_patch(req, patch.as_deref())
+}
+
+pub(crate) fn user_prompt_with_patch(req: &Request, patch: Option<&str>) -> String {
     use std::fmt::Write;
     let mut b = String::new();
     if !req.title.is_empty() {
@@ -885,8 +893,8 @@ pub fn user_prompt(req: &Request, inline: bool) -> String {
         req.files.len(),
         manifest(&req.files)
     );
-    if inline {
-        let _ = write!(b, "\n---DIFFS---\n{}\n", diffs(&req.files));
+    if let Some(patch) = patch {
+        let _ = write!(b, "\n---DIFFS---\n{patch}\n");
     }
     b
 }
@@ -968,29 +976,31 @@ pub fn manifest(files: &[File]) -> String {
 /// Renders the files' hunks, leaving out those of generated and binary
 /// files, which a reviewer does not read line by line.
 pub fn diffs(files: &[File]) -> String {
-    let parts: Vec<String> = files
-        .iter()
-        .map(|f| {
-            let mut header = format!("### {}", f.path);
-            if renamed(f) {
-                header.push_str(&format!(" (renamed from {})", f.old_path));
-            }
-            header.push_str(&format!(
-                " [{}, +{}/-{}]",
-                f.status, f.additions, f.deletions
-            ));
-            if f.binary {
-                format!("{header}\n(binary file, no diff shown)")
-            } else if f.generated {
-                format!("{header}\n(generated file, diff omitted)")
-            } else if f.patch.is_empty() {
-                format!("{header}\n(no lines to show)")
-            } else {
-                format!("{header}\n{}", f.patch.trim_end_matches('\n'))
-            }
-        })
-        .collect();
-    parts.join("\n\n")
+    use std::fmt::Write;
+    let capacity = files.iter().map(|f| {
+        f.path.len() + 40 + if f.binary || f.generated { 0 } else { f.patch.len() }
+    }).sum();
+    let mut out = String::with_capacity(capacity);
+    for (i, f) in files.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n");
+        }
+        let _ = write!(out, "### {}", f.path);
+        if renamed(f) {
+            let _ = write!(out, " (renamed from {})", f.old_path);
+        }
+        let _ = writeln!(out, " [{}, +{}/-{}]", f.status, f.additions, f.deletions);
+        out.push_str(if f.binary {
+            "(binary file, no diff shown)"
+        } else if f.generated {
+            "(generated file, diff omitted)"
+        } else if f.patch.is_empty() {
+            "(no lines to show)"
+        } else {
+            f.patch.trim_end_matches('\n')
+        });
+    }
+    out
 }
 
 /// Reads an agent's answer, the JSON object alone or fenced, and fits it
@@ -1024,14 +1034,12 @@ pub fn fit(mut a: Analysis, files: &[File]) -> Result<Analysis, Error> {
         if known.contains(p) || !p.starts_with('/') {
             return p.to_string();
         }
-        let mut found: Option<&str> = None;
-        for f in files {
-            let k = f.path.as_str();
-            if p.ends_with(&format!("/{k}")) && found.is_none_or(|x| k.len() > x.len()) {
-                found = Some(k);
-            }
-        }
-        found.unwrap_or(p).to_string()
+        // Try complete path segments from longest to shortest.
+        p.match_indices('/')
+            .map(|(i, _)| &p[i + 1..])
+            .find(|suffix| known.contains(suffix))
+            .unwrap_or(p)
+            .to_string()
     };
     let mut placed: HashSet<String> = HashSet::new();
     let mut groups: Vec<Group> = Vec::new();
@@ -1737,4 +1745,57 @@ pub(crate) mod tests {
         let b: Analysis = serde_json::from_str(&s).unwrap();
         assert_eq!(a, b);
     }
+}
+
+#[cfg(test)]
+#[test]
+#[ignore = "performance benchmark"]
+fn perf_review_preparation() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let req = Request {
+        files: (0..2000)
+            .map(|i| File {
+                path: format!("src/feature{i}/mod.rs"),
+                status: 'M',
+                patch: "@@ -1 +1 @@\n-let old = 0;\n+let new = 1;\n".repeat(12),
+                additions: 12,
+                deletions: 12,
+                ..File::default()
+            })
+            .collect(),
+        ..Request::default()
+    };
+    let paths: Vec<_> = req.files.iter().map(|f| format!("/home/user/project/{}", f.path)).collect();
+    let answer = serde_json::json!({
+        "overallSummary": "Changes feature defaults.",
+        "groups": [{"label": "Features", "filePaths": paths}],
+        "order": paths,
+    }).to_string();
+
+    let mut samples = Vec::new();
+    for sample in 0..22 {
+        let start = Instant::now();
+        let patch = black_box(diffs(&req.files));
+        black_box(user_prompt(&req, patch.len() <= INLINE_LIMIT));
+        let prepared = start.elapsed();
+        let start = Instant::now();
+        let review = parse(black_box(&answer), &req.files).unwrap();
+        assert_eq!(black_box(review.order.len()), req.files.len());
+        if sample >= 2 {
+            samples.push((prepared, start.elapsed()));
+        }
+    }
+    let report = |label, mut times: Vec<std::time::Duration>| {
+        times.sort_unstable();
+        println!("{label}: median {:.3} ms, p95 {:.3} ms (2,000 files)",
+            times[times.len() / 2].as_secs_f64() * 1000.,
+            times[times.len() * 95 / 100 - 1].as_secs_f64() * 1000.);
+    };
+    report("review prompt preparation", samples.iter().map(|s| s.0).collect());
+    report("review answer parsing and path fitting", samples.iter().map(|s| s.1).collect());
+    let preview = system_prompt(&req, "", false).len();
+    let structured = review_instructions(&req, "", false).len();
+    println!("structured review instructions: {structured} bytes ({preview} with inline schema)");
 }

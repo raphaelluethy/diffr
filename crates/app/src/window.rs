@@ -44,7 +44,7 @@ pub struct Session {
 
 /// A file a source's comments are on, kept when the window shows another.
 pub struct SavedFile {
-    pub file: diffr_git::File,
+    pub file: Arc<diffr_git::File>,
     pub old_lines: Option<Vec<String>>,
     pub new_lines: Option<Vec<String>>,
 }
@@ -832,7 +832,7 @@ impl Diffr {
                     if out.err.is_some() {
                         return None;
                     }
-                    let rest: Vec<File> = this
+                    let rest: Vec<Arc<File>> = this
                         .files
                         .iter()
                         .filter(|f| !f.loaded && !loaded_files.contains(&format!("{}\0{}", f.file.path, f.file.fingerprint)))
@@ -931,8 +931,7 @@ impl Diffr {
             let generated = f.generated || f.directory;
             match prev.remove(&path) {
                 Some(mut p) if p.file.fingerprint == f.fingerprint => {
-                    p.file = f;
-                    p.words = None;
+                    p.update_file(f);
                     next.push(p);
                 }
                 _ => {
@@ -1202,7 +1201,6 @@ impl Diffr {
                 rows.push(Row::new(RowKind::End, fi));
                 continue;
             }
-            self.files[fi].compute_words();
             let f = &self.files[fi];
             let split = split && !f.one_sided();
             let add_gap = |rows: &mut Vec<Row>, this: &Self, placed: &mut crate::features::Placement, g: diffr_git::diff::Gap| {

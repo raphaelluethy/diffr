@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use diffr_git::diff::{Range as WordRange, pairs, word_diff};
+use diffr_git::diff::{Pair, Range as WordRange, pairs, word_diff};
 use diffr_git::{File, LineKind, Status};
 use diffr_highlight::Seg;
 
@@ -46,7 +46,7 @@ pub struct Picture {
 
 /// A changed file as the review shows it.
 pub struct FileState {
-    pub file: File,
+    pub file: Arc<File>,
     pub old_lines: Option<Vec<String>>,
     pub new_lines: Option<Vec<String>>,
     pub old_hl: Option<Vec<Vec<Seg>>>,
@@ -54,12 +54,34 @@ pub struct FileState {
     pub loaded: bool,
     pub collapsed: bool,
     pub expanded: HashMap<usize, GapShown>,
-    pub words: Option<HashMap<(usize, usize), Vec<WordRange>>>,
+    words: HashMap<usize, HunkWords>,
     pub old_image: Option<Picture>,
     pub new_image: Option<Picture>,
     pub metrics: Option<FileMetrics>,
     /// The index of the file's group, -1 for none.
     pub group: i32,
+}
+
+struct HunkWords {
+    pairs: Vec<Pair>,
+    marks: HashMap<usize, (Vec<WordRange>, Vec<WordRange>)>,
+}
+
+impl HunkWords {
+    fn pair(&self, index: usize, kind: LineKind) -> Option<Pair> {
+        let i = match kind {
+            LineKind::Del => self.pairs.binary_search_by_key(&index, |p| p.del),
+            LineKind::Add => self.pairs.binary_search_by_key(&index, |p| p.add),
+            _ => return None,
+        }.ok()?;
+        Some(self.pairs[i])
+    }
+
+    fn marks(&self, index: usize, kind: LineKind) -> Option<&[WordRange]> {
+        let pair = self.pair(index, kind)?;
+        let (old, new) = self.marks.get(&pair.del)?;
+        Some(if kind == LineKind::Del { old } else { new })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -86,7 +108,7 @@ pub fn columns(s: &str) -> usize {
 impl FileState {
     pub fn new(file: File) -> Self {
         Self {
-            file,
+            file: Arc::new(file),
             old_lines: None,
             new_lines: None,
             old_hl: None,
@@ -94,7 +116,7 @@ impl FileState {
             loaded: false,
             collapsed: false,
             expanded: HashMap::new(),
-            words: None,
+            words: HashMap::new(),
             old_image: None,
             new_image: None,
             metrics: None,
@@ -143,21 +165,34 @@ impl FileState {
         ""
     }
 
-    pub fn compute_words(&mut self) {
-        if self.words.is_some() {
+    pub fn update_file(&mut self, file: File) {
+        if self.file.hunks != file.hunks {
+            self.words.clear();
+            self.metrics = None;
+        }
+        self.file = Arc::new(file);
+    }
+
+    /// Compute highlights only for pairs the virtualized list renders.
+    pub fn prepare_words(&mut self, row: &Row, split: bool) {
+        let Ok(hi) = usize::try_from(row.hunk) else { return };
+        let index = if row.a >= 0 { row.a } else if split { row.b } else { return };
+        let Ok(li) = usize::try_from(index) else { return };
+        let Some(hunk) = self.file.hunks.get(hi) else { return };
+        let lines = &hunk.lines;
+        let Some(line) = lines.get(li) else { return };
+        if !matches!(line.kind, LineKind::Del | LineKind::Add) {
             return;
         }
-        let mut words = HashMap::new();
-        for (hi, h) in self.file.hunks.iter().enumerate() {
-            for p in pairs(&h.lines) {
-                let (ra, rb) = word_diff(&h.lines[p.del].text, &h.lines[p.add].text);
-                if !ra.is_empty() || !rb.is_empty() {
-                    words.insert((hi, p.del), ra);
-                    words.insert((hi, p.add), rb);
-                }
-            }
+        let words = self.words.entry(hi).or_insert_with(|| HunkWords {
+            pairs: pairs(lines),
+            marks: HashMap::new(),
+        });
+        if let Some(pair) = words.pair(li, line.kind) {
+            words.marks.entry(pair.del).or_insert_with(|| {
+                word_diff(&lines[pair.del].text, &lines[pair.add].text)
+            });
         }
-        self.words = Some(words);
     }
 
     pub fn metrics(&mut self) -> FileMetrics {
@@ -183,9 +218,7 @@ impl FileState {
             max_cols = l.iter().fold(max_cols, |m, s| m.max(columns(s)));
         }
         let m = FileMetrics { digits: max_num.to_string().len().max(2), max_cols };
-        if self.loaded {
-            self.metrics = Some(m);
-        }
+        self.metrics = Some(m);
         m
     }
 
@@ -362,7 +395,7 @@ impl FileState {
                 ls.segs = v;
             }
         }
-        if let Some(w) = self.words.as_ref().and_then(|w| w.get(&(r.hunk as usize, idx as usize))) {
+        if let Some(w) = self.words.get(&(r.hunk as usize)).and_then(|w| w.marks(idx as usize, l.kind)) {
             ls.words = w;
         }
         ls
@@ -496,4 +529,80 @@ mod navigation_tests {
         assert_eq!(next_matching_file(4, 0, |i| !viewed[i]), Some(2));
         assert_eq!(next_matching_file(0, 0, |_| panic!("empty review")), None);
     }
+}
+
+#[cfg(test)]
+#[test]
+fn word_highlights_follow_both_view_modes_and_refresh() {
+    use diffr_git::diff::{Hunk, Line};
+
+    let file = |old: &str| File {
+        hunks: vec![Hunk {
+            lines: vec![
+                Line { kind: LineKind::Del, text: old.into(), ..Line::default() },
+                Line { kind: LineKind::Add, text: "return convert(new);".into(), ..Line::default() },
+                Line { kind: LineKind::Add, text: "// unpaired".into(), ..Line::default() },
+            ],
+            ..Hunk::default()
+        }],
+        ..File::default()
+    };
+    let mut f = FileState::new(file("return convert(old);"));
+    let row = |a, b| Row { a, b, hunk: 0, ..Row::new(RowKind::Line, 0) };
+    let unified = row(1, -1);
+    f.prepare_words(&unified, false);
+    let expected = word_diff("return convert(old);", "return convert(new);");
+    assert_eq!(f.side_of(&unified, Side::New, false).words, expected.1);
+    let split = row(0, 1);
+    f.prepare_words(&split, true);
+    assert_eq!(f.side_of(&split, Side::Old, true).words, expected.0);
+    assert_eq!(f.side_of(&split, Side::New, true).words, expected.1);
+    let unpaired = row(-1, 2);
+    f.prepare_words(&unpaired, true);
+    assert!(f.side_of(&unpaired, Side::New, true).words.is_empty());
+
+    f.update_file(file("return convert(old);"));
+    assert_eq!(f.side_of(&split, Side::Old, true).words, expected.0);
+    f.update_file(file("return convert(new);"));
+    f.prepare_words(&split, true);
+    assert!(f.side_of(&split, Side::Old, true).words.is_empty());
+    assert!(f.side_of(&split, Side::New, true).words.is_empty());
+}
+
+#[cfg(test)]
+#[test]
+#[ignore = "performance benchmark"]
+fn perf_first_diff_viewport() {
+    use diffr_git::diff::{Hunk, Line};
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let make_file = || {
+        let lines = (0..4000)
+            .flat_map(|i| {
+                [
+                    Line { kind: LineKind::Del, text: format!("let old_{i} = func(value, false);"), ..Line::default() },
+                    Line { kind: LineKind::Add, text: format!("let new_{i} = func(value, true);"), ..Line::default() },
+                ]
+            })
+            .collect();
+        FileState::new(File { hunks: vec![Hunk { lines, ..Hunk::default() }], ..File::default() })
+    };
+    let mut samples = Vec::new();
+    for sample in 0..22 {
+        let mut files: Vec<_> = (0..12).map(|_| make_file()).collect();
+        let start = Instant::now();
+        for a in 0..60 {
+            let row = Row { hunk: 0, a, ..Row::new(RowKind::Line, 0) };
+            files[0].prepare_words(&row, false);
+            assert!(!black_box(files[0].side_of(&row, Side::New, false).words).is_empty());
+        }
+        if sample >= 2 {
+            samples.push(start.elapsed());
+        }
+    }
+    samples.sort_unstable();
+    println!("first diff viewport word marks: median {:.3} ms, p95 {:.3} ms (48,000 pairs, 60 rows)",
+        samples[samples.len() / 2].as_secs_f64() * 1000.,
+        samples[samples.len() * 95 / 100 - 1].as_secs_f64() * 1000.);
 }
